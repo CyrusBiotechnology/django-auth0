@@ -15,6 +15,12 @@ AUTH0_USER_INFO_KEYS = [
     'user_id',
 ]
 
+AUTH0_FIELD_MAPPING = {
+    'email': 'email',
+    'user_metadata.first_name': 'first_name',
+    'user_metadata.last_name': 'last_name',
+}
+
 
 class Auth0Backend(object):
     def authenticate(self, **kwargs):
@@ -41,10 +47,37 @@ class Auth0Backend(object):
         # The solution is to replace the pipe with a dash
         username = user_id.replace('|', '-')
 
+        # sentinel value for user modification or creation
+        modified = False
+
         try:
-            return UserModel.objects.get(username__iexact=username)
+            u = UserModel.objects.get(username__iexact=username)
         except UserModel.DoesNotExist:
-            return UserModel.objects.create(username=username)
+            u = UserModel(username=username)
+            u.set_unusable_password()
+            modified = True
+
+        for attr_path, local_field_name in AUTH0_FIELD_MAPPING.items():
+            path = attr_path.split('.')
+            v = kwargs.get(path.pop(0))
+            for k in path:
+                print(locals())
+                try:
+                    v = v.get(k)
+                except Exception as err:
+                    print(err)
+                    break
+                if not v:
+                    break
+            else:
+                if getattr(u, local_field_name) != v:
+                    setattr(u, local_field_name, v)
+                    updated = True
+
+        if modified:
+            u.save()
+
+        return u
 
     # noinspection PyProtectedMember
     def get_user(self, user_id):
